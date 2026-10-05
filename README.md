@@ -1,5 +1,5 @@
 # 下一班 NextBus
-Mobile-friendly Traditional Chinese KMB / LWB / Citybus bus arrival web app. Built directly against official open data; no copied hkbus source or runtime dependencies.
+Mobile-friendly Traditional Chinese KMB / LWB / Citybus / green minibus arrival web app. Built directly against official open data; no copied hkbus source or runtime dependencies.
 
 ## Publish using GitHub Pages (no Node.js required)
 1. On https://github.com/new, create a public repository named `hk-bus-app`.
@@ -15,7 +15,10 @@ All asset paths are relative, so repository subpaths work. There is no backend, 
 From this folder run `python3 -m http.server 8000`, then open http://localhost:8000. Do not open index.html as a file:// URL because module loading may be blocked.
 
 ## Features
-- KMB / LWB and Citybus route search, with an operator filter and operator labels.
+- KMB / LWB, Citybus and green minibus route search, with a service filter and operator labels.
+- Green minibus regions: Hong Kong Island (HKI), Kowloon (KLN), New Territories (NT). Route number alone is not unique between regions.
+- GMB route index is loaded once; directions and service variants are requested only after selecting a route and cached for the session.
+- GMB route-specific stop names and arrival timestamps; disabled forecasts show the API reason. Circular routes retain their official single direction. Red minibuses are not included.
 - Both Citybus directions; KMB directions and service variants.
 - Operator-specific favourites; existing KMB favourites are preserved when replacing files on the same site.
 - A failed route-list request for one operator does not discard the other operator’s routes.
@@ -36,11 +39,18 @@ Citybus base: https://rt.data.gov.hk/v2/transport/citybus
 Endpoints: `/route/CTB`, `/route-stop/CTB/{route}/{direction}`, `/stop/{stop_id}`, `/eta/CTB/{stop_id}/{route}`.
 Source: https://data.gov.hk/en-data/dataset/ctb-eta-transport-realtime-eta
 
+Green minibus base: https://data.etagmb.gov.hk
+Endpoints: `/route`, `/route/{region}/{route_code}`, `/route-stop/{route_id}/{route_seq}`, `/eta/route-stop/{route_id}/{route_seq}/{stop_seq}`.
+Source: https://data.gov.hk/en-data/dataset/hk-td-sm_7-real-time-arrival-data-of-gmb
+Specification: https://data.etagmb.gov.hk/static/GMB_ETA_API_Specification.pdf
+
+To use minibuses, choose **專線小巴（綠色小巴）**, optionally choose a region, enter a route number, select its direction/service variant, then choose a stop. Use the star button to save this precise route + variant + direction + stop occurrence.
+
 ## Updating an existing deployment
 Replace these five files together: `index.html`, `styles.css`, `app.js`, `core.js`, `api.js`. The new `api.js` file is required. Commit the changes and wait for Pages deployment, then refresh the page. Repository name and Pages settings can stay as they are.
 
 ## Checks
-With Node.js installed run `npm test`. Eight automated tests pass: KMB filtering and arrival labels; Citybus direction normalization, company filtering and favourite identity; correct API paths; object stop responses, name caching, partial stop failures and independent operator route failures. Browser testing could not run because Chromium was unavailable and its download was blocked. Live API verification from the development environment was also blocked (HTTP 403). After publishing, verify live requests (including CORS), representative real routes, favourite persistence, failure states and mobile layout.
+With Node.js installed run `npm test`. Twelve automated tests pass: KMB filtering and arrival labels; Citybus direction normalization, company filtering and favourite identity; correct API paths; object stop responses, name caching, partial stop failures and independent operator route failures; GMB circular routes, service variants, region separation, repeated stop sequences, lazy loading and ETA suspension reasons. Browser testing could not run because Chromium was unavailable and its download was blocked. Live API verification from the development environment was also blocked (HTTP 403). After publishing, verify live requests (including CORS), representative real routes, favourite persistence, failure states and mobile layout.
 
 ## Reference
-Architecture reference: https://github.com/hkbus. This app implements its own static UI and official KMB and Citybus integrations.
+Architecture reference: https://github.com/hkbus. This app implements its own static UI and official KMB, Citybus and Transport Department GMB integrations.

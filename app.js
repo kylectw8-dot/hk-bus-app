@@ -1,4 +1,4 @@
-import {routeKey,filterRoutes,selectEtas,selectRemarks,arrivalLabel,favouriteKey,companyOf,companyLabel} from './core.js';
+import {routeKey,filterRoutes,selectEtas,selectRemarks,arrivalLabel,favouriteKey,companyOf,companyLabel,regionLabel} from './core.js';
 import {createApi} from './api.js';
 const busApi=createApi();
 const $=id=>document.getElementById(id),STORE='nextbus-favourites-v1';
@@ -6,27 +6,42 @@ let routes=[],current=null,currentStop=null,stopRows=[],selection=0,etaGeneratio
 let favourites=[];try{const f=JSON.parse(localStorage.getItem(STORE)||'[]');if(Array.isArray(f))favourites=f.filter(x=>x&&x.route?.route&&x.stop?.stop).map(x=>({...x,route:{...x.route,co:companyOf(x.route)},id:favouriteKey(x.route,x.stop)}));}catch{}
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 function message(container,text){container.replaceChildren(node('p',text,'empty'));}
-function routeCard(r,onClick,extra){const b=node('button',undefined,'route-card');b.append(node('span',r.route,'route-no'));const info=node('span',undefined,'route-info');info.append(node('strong',`往 ${r.dest_tc}`),node('small',`${companyLabel(r)} · ${extra||`由 ${r.orig_tc} · ${r.service_type==='1'?'一般服務':`服務類別 ${r.service_type}`}`}`));b.append(info,node('span','›','arrow'));b.onclick=onClick;return b;}
-function renderRoutes(){const found=filterRoutes(routes,$('query').value,$('operator').value);$('routes').replaceChildren();if(!routes.length)return;$('route-status').textContent=`找到 ${found.length} 項路線／方向${found.length>60?' · 請輸入路線縮窄搜尋':''}`;$('route-status').className='';for(const r of found.slice(0,60))$('routes').append(routeCard(r,()=>openRoute(r)));if(!found.length)message($('routes'),'找不到此路線，請嘗試其他路線號碼。');}
+function routeCard(r,onClick,extra){const b=node('button',undefined,'route-card');b.append(node('span',r.route,'route-no'));const info=node('span',undefined,'route-info');info.append(node('strong',r.pending?'點選查看方向及班次':`往 ${r.dest_tc}`),node('small',`${companyLabel(r)} · ${extra||(companyOf(r)==='GMB'?`${regionLabel(r.region)} · ${r.description_tc||'選擇路線方向'}`:`由 ${r.orig_tc} · ${r.service_type==='1'?'一般服務':`服務類別 ${r.service_type}`}`)}`));b.append(info,node('span','›','arrow'));b.onclick=onClick;return b;}
+function renderRoutes(){const found=filterRoutes(routes,$('query').value,$('operator').value,$('region').value);$('routes').replaceChildren();if(!routes.length)return;$('route-status').textContent=`找到 ${found.length} 項路線／方向${found.length>60?' · 請輸入路線縮窄搜尋':''}`;$('route-status').className='';for(const r of found.slice(0,60))$('routes').append(routeCard(r,()=>r.pending?openGmbChoices(r):openRoute(r)));if(!found.length)message($('routes'),'找不到此路線，請嘗試其他路線號碼。');}
 async function loadRoutes(){
   $('reload').disabled=true;
-  $('operator-status').textContent='正在載入九巴／龍運及城巴路線…';
+  $('operator-status').textContent='正在載入九巴／龍運、城巴及專線小巴路線…';
   $('operator-status').className='';
-  const results=await Promise.allSettled(['KMB','CTB'].map(co=>busApi.routes(co)));
+  const results=await Promise.allSettled(['KMB','CTB','GMB'].map(co=>busApi.routes(co)));
   const failed=[];
   results.forEach((result,i)=>{
-    const co=['KMB','CTB'][i];
+    const co=['KMB','CTB','GMB'][i];
     if(result.status==='fulfilled') routes=[...routes.filter(r=>companyOf(r)!==co),...result.value];
-    else failed.push(co==='CTB'?'城巴':'九巴／龍運');
+    else failed.push(companyLabel({co}));
   });
   renderRoutes();
-  $('operator-status').textContent=failed.length?`${failed.join('、')}路線載入失敗，請按「重新載入」重試。${routes.length?'目前顯示已載入路線。':''}`:'九巴／龍運及城巴路線已載入';
+  $('operator-status').textContent=failed.length?`${failed.join('、')}路線載入失敗，請按「重新載入」重試。${routes.length?'目前顯示已載入路線。':''}`:'九巴／龍運、城巴及專線小巴路線已載入';
   $('operator-status').className=failed.length?'error':'';
   if(!routes.length)$('route-status').textContent='暫無可用路線資料。';
   $('reload').disabled=false;
 }
+async function openGmbChoices(r){
+  closeDetail();
+  const token=++selection;
+  $('gmb-options').hidden=false;
+  $('gmb-choice-title').textContent=`${regionLabel(r.region)}專線小巴 ${r.route} · 選擇方向／班次`;
+  message($('gmb-directions'),'正在取得小巴路線資料…');
+  $('gmb-options').scrollIntoView({behavior:'smooth',block:'start'});
+  try{
+    const choices=await busApi.gmbDirections(r);
+    if(token!==selection)return;
+    $('gmb-directions').replaceChildren();
+    for(const choice of choices)$('gmb-directions').append(routeCard(choice,()=>openRoute(choice),`${regionLabel(choice.region)} · 由 ${choice.orig_tc} · ${choice.description_tc||'一般班次'}`));
+    if(!choices.length)message($('gmb-directions'),'暫無方向資料。');
+  }catch{if(token===selection)message($('gmb-directions'),'無法取得小巴方向，請再次點選路線重試。');}
+}
 function resetEta(){etaGeneration++;etaBusy=false;lastEtas=[];lastRemarks=[];lastSuccess=null;$('refresh').disabled=true;$('save').disabled=true;$('updated').textContent='尚未更新';$('updated').className='';$('etas').replaceChildren();}
-async function openRoute(r,savedStop){const token=++selection;current=r;currentStop=null;resetEta();$('detail').hidden=false;$('route-title').textContent=`${r.route} · 往 ${r.dest_tc}`;$('route-description').textContent=`${companyLabel(r)} · 由 ${r.orig_tc} 開出 · ${r.service_type==='1'?'一般服務':`服務類別 ${r.service_type}`}`;$('stop-name').textContent='請選擇巴士站';$('stop-select').replaceChildren(node('option','正在載入巴士站…'));$('stop-select').disabled=true;$('stop-status').textContent='';$('detail').scrollIntoView({behavior:'smooth',block:'start'});try{const rows=await busApi.stops(r);if(token!==selection)return;stopRows=rows;const placeholder=node('option','請選擇巴士站');placeholder.value='';$('stop-select').replaceChildren(placeholder);for(const s of stopRows){const option=node('option',`${s.seq}. ${s.name_tc||s.stop}`);option.value=String(s.seq);$('stop-select').append(option);}$('stop-select').disabled=false;if(!rows.length)$('stop-status').textContent='此方向暫無巴士站資料，請選擇另一方向。';else if(rows.some(s=>s.nameMissing))$('stop-status').textContent='部分巴士站名稱暫未能載入，已顯示巴士站編號。';if(savedStop){const s=stopRows.find(s=>s.stop===savedStop.stop&&Number(s.seq)===Number(savedStop.seq));if(s){$('stop-select').value=String(s.seq);chooseStop();}else $('stop-status').textContent='收藏的巴士站已改動，請重新選擇並收藏。';}}catch{if(token!==selection)return;$('stop-status').textContent='無法載入巴士站，請重新點選路線重試。';$('stop-select').replaceChildren(node('option','暫時無法載入'));}}
+async function openRoute(r,savedStop){$('gmb-options').hidden=true;const token=++selection;current=r;currentStop=null;resetEta();$('detail').hidden=false;$('route-title').textContent=`${r.route} · 往 ${r.dest_tc}`;$('route-description').textContent=`${companyLabel(r)} · ${companyOf(r)==='GMB'?regionLabel(r.region)+' · ':''}由 ${r.orig_tc} 開出 · ${companyOf(r)==='GMB'?(r.description_tc||'一般服務'):(r.service_type==='1'?'一般服務':`服務類別 ${r.service_type}`)}`;$('stop-name').textContent='請選擇巴士站';$('stop-select').replaceChildren(node('option','正在載入巴士站…'));$('stop-select').disabled=true;$('stop-status').textContent='';$('detail').scrollIntoView({behavior:'smooth',block:'start'});try{const rows=await busApi.stops(r);if(token!==selection)return;stopRows=rows;const placeholder=node('option','請選擇巴士站');placeholder.value='';$('stop-select').replaceChildren(placeholder);for(const s of stopRows){const option=node('option',`${s.seq}. ${s.name_tc||s.stop}`);option.value=String(s.seq);$('stop-select').append(option);}$('stop-select').disabled=false;if(!rows.length)$('stop-status').textContent='此方向暫無巴士站資料，請選擇另一方向。';else if(rows.some(s=>s.nameMissing))$('stop-status').textContent='部分巴士站名稱暫未能載入，已顯示巴士站編號。';if(savedStop){const s=stopRows.find(s=>s.stop===savedStop.stop&&Number(s.seq)===Number(savedStop.seq));if(s){$('stop-select').value=String(s.seq);chooseStop();}else $('stop-status').textContent='收藏的巴士站已改動，請重新選擇並收藏。';}}catch{if(token!==selection)return;$('stop-status').textContent='無法載入巴士站，請重新點選路線重試。';$('stop-select').replaceChildren(node('option','暫時無法載入'));}}
 function chooseStop(){resetEta();currentStop=stopRows.find(s=>String(s.seq)===$('stop-select').value)||null;if(!currentStop){$('stop-name').textContent='請選擇巴士站';return;}$('stop-name').textContent=currentStop.name_tc||currentStop.stop;$('save').disabled=false;updateSave();refreshEta();}
 function renderEtas(){const container=$('etas');container.replaceChildren();const now=Date.now(),valid=lastEtas.filter(e=>Date.parse(e.eta)>=now-30000);if(!valid.length){message(container,lastRemarks.length?`暫無到站預報 · ${lastRemarks.join('；')}`:'暫無到站預報。請參閱營辦商的服務資訊。');return;}for(const e of valid){const row=node('div',undefined,'eta-row'),label=arrivalLabel(e.eta,now),value=node('span',label,'eta-value');if(label!=='即將到站')value.append(node('small','分鐘'));const note=node('span',undefined,'eta-note');note.append(node('div',new Date(e.eta).toLocaleTimeString('zh-HK',{timeZone:'Asia/Hong_Kong',hour:'2-digit',minute:'2-digit'})),node('div',e.rmk_tc||'預計到站時間'));row.append(value,note);container.append(row);}}
 async function refreshEta(){if(!current||!currentStop||etaBusy||document.hidden)return;const token=++etaGeneration,r=current,s=currentStop;etaBusy=true;$('refresh').disabled=true;if(!lastSuccess)message($('etas'),'正在取得到站時間…');try{const data=await busApi.etas(r,s);if(token!==etaGeneration)return;lastEtas=selectEtas(data,r,s);lastRemarks=selectRemarks(data,r,s);lastSuccess=Date.now();renderEtas();$('updated').className='';$('updated').textContent=`更新於 ${new Date(lastSuccess).toLocaleTimeString('zh-HK',{timeZone:'Asia/Hong_Kong'})}`;}catch{if(token!==etaGeneration)return;if(!lastSuccess)message($('etas'),'無法取得到站時間，請按更新重試。');$('updated').className='error';$('updated').textContent=lastSuccess?`更新失敗 · 以下為舊資料 (${new Date(lastSuccess).toLocaleTimeString('zh-HK',{timeZone:'Asia/Hong_Kong'})})`:'更新失敗，請檢查網絡。';}finally{if(token===etaGeneration){etaBusy=false;$('refresh').disabled=false;}}}
@@ -34,6 +49,6 @@ function updateSave(){if(!currentStop)return;$('save').textContent=favourites.so
 function renderFavourites(){$('fav-count').textContent=favourites.length;$('favourites').replaceChildren();for(const f of favourites)$('favourites').append(routeCard(f.route,()=>openRoute(routes.find(r=>routeKey(r)===routeKey(f.route))||f.route,f.stop),`${f.stopName} · 第 ${f.stop.seq} 站`));if(!favourites.length)message($('favourites'),'未有收藏。搜尋路線並選擇巴士站，再按「☆ 收藏」。');}
 function saveFavourite(){if(!currentStop)return;const id=favouriteKey(current,currentStop),next=favourites.some(f=>f.id===id)?favourites.filter(f=>f.id!==id):[...favourites,{id,route:current,stop:currentStop,stopName:currentStop.name_tc||currentStop.stop}];try{localStorage.setItem(STORE,JSON.stringify(next));favourites=next;renderFavourites();updateSave();}catch{$('updated').textContent='瀏覽器無法儲存收藏，請允許網站儲存空間。';}}
 function tab(name){$('search-panel').hidden=name!=='search';$('fav-panel').hidden=name!=='fav';for(const id of ['search','fav']){$(`${id}-tab`).classList.toggle('active',id===name);$(`${id}-tab`).setAttribute('aria-pressed',String(id===name));}closeDetail();}
-function closeDetail(){selection++;current=null;currentStop=null;resetEta();$('detail').hidden=true;}
-$('query').oninput=renderRoutes;$('operator').onchange=renderRoutes;$('reload').onclick=loadRoutes;$('stop-select').onchange=chooseStop;$('refresh').onclick=refreshEta;$('save').onclick=saveFavourite;$('close-detail').onclick=closeDetail;$('search-tab').onclick=()=>tab('search');$('fav-tab').onclick=()=>tab('fav');
+function closeDetail(){$('gmb-options').hidden=true;selection++;current=null;currentStop=null;resetEta();$('detail').hidden=true;}
+const searchChanged=()=>{closeDetail();renderRoutes();};$('query').oninput=searchChanged;$('operator').onchange=searchChanged;$('region').onchange=searchChanged;$('reload').onclick=loadRoutes;$('stop-select').onchange=chooseStop;$('refresh').onclick=refreshEta;$('save').onclick=saveFavourite;$('close-detail').onclick=closeDetail;$('search-tab').onclick=()=>tab('search');$('fav-tab').onclick=()=>tab('fav');
 setInterval(()=>{if(!document.hidden&&currentStop)refreshEta();},60000);setInterval(()=>{if(!document.hidden&&currentStop&&lastSuccess)renderEtas();},15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&currentStop)refreshEta();});renderFavourites();loadRoutes();
